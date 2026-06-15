@@ -59,10 +59,11 @@ pub enum Agent {
     Hermes,
     Kilo,
     Qodercli,
+    Crush,
 }
 
 impl Agent {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -81,6 +82,7 @@ impl Agent {
         Self::Hermes,
         Self::Kilo,
         Self::Qodercli,
+        Self::Crush,
     ];
 }
 
@@ -104,6 +106,7 @@ pub fn agent_label(agent: Agent) -> &'static str {
         Agent::Hermes => "hermes",
         Agent::Kilo => "kilo",
         Agent::Qodercli => "qodercli",
+        Agent::Crush => "crush",
     }
 }
 
@@ -128,6 +131,7 @@ pub fn parse_agent_label(agent: &str) -> Option<Agent> {
         "hermes" | "hermes-agent" => Some(Agent::Hermes),
         "kilo" | "kilo-code" | "kilo code" => Some(Agent::Kilo),
         "qodercli" | "qoderclicn" | "qoder" | "qodercn" => Some(Agent::Qodercli),
+        "crush" => Some(Agent::Crush),
         _ => None,
     }
 }
@@ -156,6 +160,7 @@ pub fn identify_agent(process_name: &str) -> Option<Agent> {
         "hermes" | "hermes-agent" => Some(Agent::Hermes),
         "kilo" | "kilo-code" | "kilo code" => Some(Agent::Kilo),
         "qodercli" | "qoderclicn" | "qoder" | "qodercn" => Some(Agent::Qodercli),
+        "crush" => Some(Agent::Crush),
         _ => None,
     }
 }

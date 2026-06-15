@@ -170,6 +170,13 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
         ("herdr:kilo", "kilo", AgentSessionRefKind::Id) => {
             vec!["kilo".into(), "--session".into(), session_ref.value.clone()]
         }
+        ("herdr:crush", "crush", AgentSessionRefKind::Id) => {
+            vec![
+                "crush".into(),
+                "--session".into(),
+                session_ref.value.clone(),
+            ]
+        }
         ("herdr:cursor", "cursor", AgentSessionRefKind::Id) => {
             vec![
                 "cursor-agent".into(),
@@ -209,6 +216,7 @@ fn is_official_agent_source(source: &str, agent: &str) -> bool {
             | ("herdr:opencode", "opencode")
             | ("herdr:qodercli", "qodercli")
             | ("herdr:kilo", "kilo")
+            | ("herdr:crush", "crush")
             | ("herdr:cursor", "cursor")
     )
 }
