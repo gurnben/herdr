@@ -2458,13 +2458,7 @@ pub(crate) fn install_crush() -> io::Result<CrushInstallPaths> {
         "crush config",
         "crush config hooks",
     )?;
-    ensure_command_hook(
-        hooks,
-        "PreToolUse",
-        hook_command(&hook_path, None),
-        10,
-        None,
-    )?;
+    ensure_crush_hook(hooks, "PreToolUse", hook_command(&hook_path, None), 10)?;
 
     fs::write(&config_path, serde_json::to_string_pretty(&config_file)?)?;
 
@@ -2584,8 +2578,7 @@ pub(crate) fn uninstall_crush() -> io::Result<CrushUninstallResult> {
             "crush config",
             "crush config hooks",
         )? {
-            updated_config |=
-                remove_hook_commands(hooks, "PreToolUse", &hook_path, None)?;
+            updated_config |= remove_crush_hook(hooks, "PreToolUse", &hook_path)?;
         }
 
         if updated_config {
@@ -2855,6 +2848,57 @@ fn ensure_simple_command_hook(
 
     entries.push(json!({ "command": command }));
     Ok(())
+}
+
+fn ensure_crush_hook(
+    hooks: &mut Map<String, Value>,
+    event: &str,
+    command: String,
+    timeout: u64,
+) -> io::Result<()> {
+    let entries = hooks
+        .entry(event.to_string())
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or_else(|| io::Error::other(format!("hook entries for {event} must be an array")))?;
+
+    if entries
+        .iter()
+        .any(|entry| entry.get("command").and_then(Value::as_str) == Some(command.as_str()))
+    {
+        return Ok(());
+    }
+
+    entries.push(json!({ "command": command, "timeout": timeout }));
+    Ok(())
+}
+
+fn remove_crush_hook(
+    hooks: &mut Map<String, Value>,
+    event: &str,
+    hook_path: &Path,
+) -> io::Result<bool> {
+    let Some(entries_value) = hooks.get_mut(event) else {
+        return Ok(false);
+    };
+
+    let entries = entries_value
+        .as_array_mut()
+        .ok_or_else(|| io::Error::other(format!("hook entries for {event} must be an array")))?;
+
+    let variants = hook_command_variants(hook_path, None);
+    let before = entries.len();
+    entries.retain(|entry| {
+        let Some(cmd) = entry.get("command").and_then(Value::as_str) else {
+            return true;
+        };
+        !variants.iter().any(|v| v == cmd)
+    });
+    let removed = entries.len() != before;
+    if entries.is_empty() {
+        hooks.remove(event);
+    }
+    Ok(removed)
 }
 
 fn remove_simple_command_hook(
@@ -6535,10 +6579,7 @@ mod tests {
             installed.hook_path,
             crush_config_dir.join("hooks").join(CRUSH_HOOK_INSTALL_NAME)
         );
-        assert_eq!(
-            installed.config_path,
-            crush_config_dir.join("crush.json")
-        );
+        assert_eq!(installed.config_path, crush_config_dir.join("crush.json"));
         assert_eq!(
             fs::read_to_string(&installed.hook_path).unwrap(),
             CRUSH_HOOK_ASSET
@@ -6558,9 +6599,12 @@ mod tests {
             .get("command")
             .and_then(Value::as_str)
             .is_some_and(|command| {
-                command.starts_with("bash ")
-                    && command.contains("herdr-agent-state.sh")
+                command.starts_with("bash ") && command.contains("herdr-agent-state.sh")
             }));
+        assert_eq!(
+            pre_tool_use[1].get("timeout").and_then(Value::as_u64),
+            Some(10)
+        );
 
         std::env::remove_var("HOME");
         let _ = fs::remove_dir_all(base);
