@@ -382,6 +382,16 @@ mod tests {
         );
         assert_eq!(
             plan(
+                "herdr:crush",
+                "crush",
+                &AgentSessionRef::id("crush-session").unwrap()
+            )
+            .unwrap()
+            .argv,
+            vec!["crush", "--session", "crush-session"]
+        );
+        assert_eq!(
+            plan(
                 "herdr:cursor",
                 "cursor",
                 &AgentSessionRef::id("cursor-session").unwrap()
@@ -560,6 +570,7 @@ mod tests {
         let hermes_session = absolute_test_path("hermes-session");
         let opencode_session = absolute_test_path("opencode-session");
         let kilo_session = absolute_test_path("kilo-session");
+        let crush_session = absolute_test_path("crush-session");
         let copilot_session = absolute_test_path("copilot-session");
         let devin_session = absolute_test_path("devin-session");
         assert!(plan(
@@ -578,6 +589,12 @@ mod tests {
             "herdr:kilo",
             "kilo",
             &AgentSessionRef::path(&kilo_session).unwrap()
+        )
+        .is_none());
+        assert!(plan(
+            "herdr:crush",
+            "crush",
+            &AgentSessionRef::path(&crush_session).unwrap()
         )
         .is_none());
         assert!(plan(
@@ -611,6 +628,13 @@ mod tests {
             "kilo",
             AgentSessionRefKind::Id,
             "kilo-session"
+        )
+        .is_some());
+        assert!(session_ref_from_snapshot(
+            "herdr:crush",
+            "crush",
+            AgentSessionRefKind::Id,
+            "crush-session"
         )
         .is_some());
         assert!(session_ref_from_snapshot(

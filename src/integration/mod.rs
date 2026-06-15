@@ -6514,4 +6514,164 @@ mod tests {
         std::env::remove_var(CURSOR_CONFIG_DIR_ENV_VAR);
         let _ = fs::remove_dir_all(base);
     }
+
+    #[test]
+    fn install_crush_writes_hook_and_updates_config() {
+        let _lock = integration_env_lock();
+        let base = unique_base();
+        let home = base.join("home");
+        let crush_config_dir = home.join(".config/crush");
+        fs::create_dir_all(&crush_config_dir).unwrap();
+        fs::write(
+            crush_config_dir.join("crush.json"),
+            r#"{"hooks":{"PreToolUse":[{"command":"echo keep-me"}]}}"#,
+        )
+        .unwrap();
+        std::env::set_var("HOME", &home);
+
+        let installed = install_crush().unwrap();
+
+        assert_eq!(
+            installed.hook_path,
+            crush_config_dir.join("hooks").join(CRUSH_HOOK_INSTALL_NAME)
+        );
+        assert_eq!(
+            installed.config_path,
+            crush_config_dir.join("crush.json")
+        );
+        assert_eq!(
+            fs::read_to_string(&installed.hook_path).unwrap(),
+            CRUSH_HOOK_ASSET
+        );
+
+        let config: Value =
+            serde_json::from_str(&fs::read_to_string(crush_config_dir.join("crush.json")).unwrap())
+                .unwrap();
+        let hooks = config.get("hooks").and_then(Value::as_object).unwrap();
+        let pre_tool_use = hooks.get("PreToolUse").and_then(Value::as_array).unwrap();
+        assert_eq!(pre_tool_use.len(), 2);
+        assert_eq!(
+            pre_tool_use[0].get("command").and_then(Value::as_str),
+            Some("echo keep-me")
+        );
+        assert!(pre_tool_use[1]
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(|command| {
+                command.starts_with("bash ")
+                    && command.contains("herdr-agent-state.sh")
+            }));
+
+        std::env::remove_var("HOME");
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn install_crush_is_idempotent_for_hook_entries() {
+        let _lock = integration_env_lock();
+        let base = unique_base();
+        let home = base.join("home");
+        let crush_config_dir = home.join(".config/crush");
+        fs::create_dir_all(&crush_config_dir).unwrap();
+        std::env::set_var("HOME", &home);
+
+        install_crush().unwrap();
+        install_crush().unwrap();
+
+        let config: Value =
+            serde_json::from_str(&fs::read_to_string(crush_config_dir.join("crush.json")).unwrap())
+                .unwrap();
+        let hooks = config.get("hooks").and_then(Value::as_object).unwrap();
+        let pre_tool_use = hooks.get("PreToolUse").and_then(Value::as_array).unwrap();
+        assert_eq!(pre_tool_use.len(), 1);
+
+        std::env::remove_var("HOME");
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn uninstall_crush_removes_hook_and_cleans_config() {
+        let _lock = integration_env_lock();
+        let base = unique_base();
+        let home = base.join("home");
+        let crush_config_dir = home.join(".config/crush");
+        fs::create_dir_all(&crush_config_dir).unwrap();
+        std::env::set_var("HOME", &home);
+
+        install_crush().unwrap();
+        let mut config: Value =
+            serde_json::from_str(&fs::read_to_string(crush_config_dir.join("crush.json")).unwrap())
+                .unwrap();
+        config["hooks"]["PreToolUse"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "command": "echo user-defined" }));
+        fs::write(
+            crush_config_dir.join("crush.json"),
+            serde_json::to_string_pretty(&config).unwrap(),
+        )
+        .unwrap();
+
+        let result = uninstall_crush().unwrap();
+        assert!(result.removed_hook_file);
+        assert!(result.updated_config);
+        assert!(!crush_config_dir
+            .join("hooks")
+            .join(CRUSH_HOOK_INSTALL_NAME)
+            .is_file());
+
+        let config: Value =
+            serde_json::from_str(&fs::read_to_string(crush_config_dir.join("crush.json")).unwrap())
+                .unwrap();
+        let hooks = config.get("hooks").and_then(Value::as_object).unwrap();
+        let pre_tool_use = hooks.get("PreToolUse").and_then(Value::as_array).unwrap();
+        assert_eq!(pre_tool_use.len(), 1);
+        assert_eq!(
+            pre_tool_use[0].get("command").and_then(Value::as_str),
+            Some("echo user-defined")
+        );
+
+        std::env::remove_var("HOME");
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn install_crush_errors_when_config_dir_missing() {
+        let _lock = integration_env_lock();
+        let base = unique_base();
+        let home = base.join("home");
+        fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+
+        let err = install_crush().unwrap_err().to_string();
+        assert!(
+            err.contains("crush config directory not found"),
+            "unexpected error: {err}"
+        );
+
+        std::env::remove_var("HOME");
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn install_crush_creates_config_file_when_absent() {
+        let _lock = integration_env_lock();
+        let base = unique_base();
+        let home = base.join("home");
+        let crush_config_dir = home.join(".config/crush");
+        fs::create_dir_all(&crush_config_dir).unwrap();
+        std::env::set_var("HOME", &home);
+
+        let installed = install_crush().unwrap();
+
+        assert!(installed.config_path.is_file());
+        let config: Value =
+            serde_json::from_str(&fs::read_to_string(&installed.config_path).unwrap()).unwrap();
+        let hooks = config.get("hooks").and_then(Value::as_object).unwrap();
+        let pre_tool_use = hooks.get("PreToolUse").and_then(Value::as_array).unwrap();
+        assert_eq!(pre_tool_use.len(), 1);
+
+        std::env::remove_var("HOME");
+        let _ = fs::remove_dir_all(base);
+    }
 }
