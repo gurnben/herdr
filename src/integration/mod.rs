@@ -177,6 +177,9 @@ const CURSOR_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
 const CURSOR_HOOK_ASSET: &str = include_str!("assets/cursor/herdr-agent-state.sh");
 const CURSOR_INTEGRATION_VERSION: u32 = 1;
 const CURSOR_CONFIG_DIR_ENV_VAR: &str = "CURSOR_CONFIG_DIR";
+const CRUSH_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
+const CRUSH_HOOK_ASSET: &str = include_str!("assets/crush/herdr-agent-state.sh");
+const CRUSH_INTEGRATION_VERSION: u32 = 1;
 const INTEGRATION_VERSION_MARKER: &str = "HERDR_INTEGRATION_VERSION=";
 
 #[derive(Debug)]
@@ -250,6 +253,12 @@ pub(crate) struct QodercliInstallPaths {
 pub(crate) struct CursorInstallPaths {
     pub hook_path: PathBuf,
     pub hooks_path: PathBuf,
+}
+
+#[derive(Debug)]
+pub(crate) struct CrushInstallPaths {
+    pub hook_path: PathBuf,
+    pub config_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -390,6 +399,14 @@ pub(crate) struct HermesUninstallResult {
     pub plugin_dir: PathBuf,
     pub config_path: PathBuf,
     pub removed_plugin_dir: bool,
+    pub updated_config: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct CrushUninstallResult {
+    pub hook_path: PathBuf,
+    pub config_path: PathBuf,
+    pub removed_hook_file: bool,
     pub updated_config: bool,
 }
 
@@ -657,6 +674,19 @@ fn install_target_inner(target: crate::api::schema::IntegrationTarget) -> io::Re
                     installed.hook_path.display()
                 ),
                 format!("updated cursor hooks at {}", installed.hooks_path.display()),
+            ]
+        }
+        crate::api::schema::IntegrationTarget::Crush => {
+            let installed = install_crush()?;
+            vec![
+                format!(
+                    "installed crush integration hook to {}",
+                    installed.hook_path.display()
+                ),
+                format!(
+                    "ensured crush config at {}",
+                    installed.config_path.display()
+                ),
             ]
         }
     };
@@ -986,6 +1016,33 @@ pub(crate) fn uninstall_target(
             }
             messages
         }
+        crate::api::schema::IntegrationTarget::Crush => {
+            let result = uninstall_crush()?;
+            let mut messages = Vec::new();
+            if result.removed_hook_file {
+                messages.push(format!(
+                    "removed crush hook at {}",
+                    result.hook_path.display()
+                ));
+            } else {
+                messages.push(format!(
+                    "no crush hook found at {}",
+                    result.hook_path.display()
+                ));
+            }
+            if result.updated_config {
+                messages.push(format!(
+                    "removed herdr crush hook entries from {}",
+                    result.config_path.display()
+                ));
+            } else {
+                messages.push(format!(
+                    "no herdr crush hook entries found in {}",
+                    result.config_path.display()
+                ));
+            }
+            messages
+        }
     };
 
     crate::logging::integration_action("uninstall", integration_target_label(target), "ok");
@@ -1009,6 +1066,7 @@ pub(crate) fn integration_target_label(
         crate::api::schema::IntegrationTarget::Hermes => "hermes",
         crate::api::schema::IntegrationTarget::Qodercli => "qodercli",
         crate::api::schema::IntegrationTarget::Cursor => "cursor",
+        crate::api::schema::IntegrationTarget::Crush => "crush",
     }
 }
 
@@ -1033,6 +1091,7 @@ fn integration_target_command_names(
         crate::api::schema::IntegrationTarget::Hermes => &["hermes"],
         crate::api::schema::IntegrationTarget::Qodercli => qodercli_command_names(),
         crate::api::schema::IntegrationTarget::Cursor => cursor_command_names(),
+        crate::api::schema::IntegrationTarget::Crush => &["crush"],
     }
 }
 
@@ -1237,7 +1296,7 @@ fn integration_specs() -> [(
     crate::api::schema::IntegrationTarget,
     io::Result<PathBuf>,
     u32,
-); 13] {
+); 14] {
     [
         (
             crate::api::schema::IntegrationTarget::Pi,
@@ -1303,6 +1362,11 @@ fn integration_specs() -> [(
             crate::api::schema::IntegrationTarget::Cursor,
             cursor_dir().map(|dir| dir.join(CURSOR_HOOK_INSTALL_NAME)),
             CURSOR_INTEGRATION_VERSION,
+        ),
+        (
+            crate::api::schema::IntegrationTarget::Crush,
+            crush_dir().map(|dir| dir.join("hooks").join(CRUSH_HOOK_INSTALL_NAME)),
+            CRUSH_INTEGRATION_VERSION,
         ),
     ]
 }
@@ -2363,6 +2427,53 @@ pub(crate) fn install_cursor() -> io::Result<CursorInstallPaths> {
     })
 }
 
+pub(crate) fn install_crush() -> io::Result<CrushInstallPaths> {
+    let dir = crush_dir()?;
+    if !dir.is_dir() {
+        return Err(io::Error::other(format!(
+            "crush config directory not found at {}. install crush first",
+            dir.display()
+        )));
+    }
+
+    let hooks_dir = dir.join("hooks");
+    fs::create_dir_all(&hooks_dir)?;
+
+    let hook_path = hooks_dir.join(CRUSH_HOOK_INSTALL_NAME);
+    fs::write(&hook_path, CRUSH_HOOK_ASSET)?;
+    make_executable(&hook_path)?;
+
+    let config_path = dir.join("crush.json");
+    let mut config_file = if config_path.is_file() {
+        serde_json::from_str::<Value>(&fs::read_to_string(&config_path)?).map_err(|err| {
+            io::Error::other(format!("failed to parse {}: {err}", config_path.display()))
+        })?
+    } else {
+        json!({})
+    };
+
+    let hooks = ensure_hooks_object(
+        &mut config_file,
+        &config_path,
+        "crush config",
+        "crush config hooks",
+    )?;
+    ensure_command_hook(
+        hooks,
+        "PreToolUse",
+        hook_command(&hook_path, None),
+        10,
+        None,
+    )?;
+
+    fs::write(&config_path, serde_json::to_string_pretty(&config_file)?)?;
+
+    Ok(CrushInstallPaths {
+        hook_path,
+        config_path,
+    })
+}
+
 pub(crate) fn uninstall_qodercli() -> io::Result<QodercliUninstallResult> {
     let hook_path = qodercli_dir()?
         .join("hooks")
@@ -2452,6 +2563,43 @@ pub(crate) fn uninstall_cursor() -> io::Result<CursorUninstallResult> {
         hooks_path,
         removed_hook_file,
         updated_hooks,
+    })
+}
+
+pub(crate) fn uninstall_crush() -> io::Result<CrushUninstallResult> {
+    let crush_home = crush_dir()?;
+    let hook_path = crush_home.join("hooks").join(CRUSH_HOOK_INSTALL_NAME);
+    let config_path = crush_home.join("crush.json");
+    let mut updated_config = false;
+
+    if config_path.is_file() {
+        let mut config_file = serde_json::from_str::<Value>(&fs::read_to_string(&config_path)?)
+            .map_err(|err| {
+                io::Error::other(format!("failed to parse {}: {err}", config_path.display()))
+            })?;
+
+        if let Some(hooks) = hooks_object_if_present(
+            &mut config_file,
+            &config_path,
+            "crush config",
+            "crush config hooks",
+        )? {
+            updated_config |=
+                remove_hook_commands(hooks, "PreToolUse", &hook_path, None)?;
+        }
+
+        if updated_config {
+            fs::write(&config_path, serde_json::to_string_pretty(&config_file)?)?;
+        }
+    }
+
+    let removed_hook_file = remove_file_if_exists(&hook_path)?;
+
+    Ok(CrushUninstallResult {
+        hook_path,
+        config_path,
+        removed_hook_file,
+        updated_config,
     })
 }
 
@@ -3435,6 +3583,10 @@ fn opencode_dir() -> io::Result<PathBuf> {
 
 fn kilo_dir() -> io::Result<PathBuf> {
     Ok(home_dir()?.join(".config/kilo"))
+}
+
+fn crush_dir() -> io::Result<PathBuf> {
+    Ok(home_dir()?.join(".config/crush"))
 }
 
 fn hermes_dir() -> io::Result<PathBuf> {

@@ -310,6 +310,7 @@ fn all_bundled_manifests_parse_and_validate() {
         Agent::Hermes,
         Agent::Kilo,
         Agent::Qodercli,
+        Agent::Crush,
     ];
 
     for agent in agents {

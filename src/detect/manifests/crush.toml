@@ -1,0 +1,53 @@
+id = "crush"
+version = "2026.06.15.1"
+min_engine_version = 1
+updated_at = "2026-06-15T00:00:00Z"
+aliases = ["herdr:crush"]
+
+[[rules]]
+id = "permission_required"
+state = "blocked"
+priority = 300
+region = "whole_recent"
+visible_blocker = true
+contains = ["Permission Required"]
+any = [
+  { contains = ["Allow"] },
+  { contains = ["Deny"] },
+]
+
+[[rules]]
+id = "press_again_to_cancel_working"
+state = "working"
+priority = 110
+region = "whole_recent"
+visible_working = true
+contains = ["press again to cancel"]
+
+[[rules]]
+id = "working_placeholder"
+state = "working"
+priority = 100
+region = "whole_recent"
+visible_working = true
+any = [
+  { contains = ["Working!"] },
+  { contains = ["Working..."] },
+  { contains = ["Processing..."] },
+  { contains = ["Thinking..."] },
+  { line_regex = ['(?i)Brrrrr'] },
+  { line_regex = ['(?i)Prrrrrrrr'] },
+]
+
+[[rules]]
+id = "idle_placeholder"
+state = "idle"
+priority = 50
+region = "whole_recent"
+visible_idle = true
+any = [
+  { contains = ["Ready!"] },
+  { contains = ["Ready..."] },
+  { contains = ["Ready?"] },
+  { contains = ["Ready for instructions"] },
+]
